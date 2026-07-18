@@ -1,7 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use emble_gui_rs::board;
-use emble_gui_rs::uci_engine;
+use emblium::board;
+use emblium::uci_engine;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -70,7 +70,13 @@ impl AppState {
 
 fn main() {
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
-    let mut win = Window::new(100, 100, 1050, 700, "Emble GUI");
+    app::set_visible_focus(false);
+    app::background(0x1E, 0x1E, 0x28);
+    app::background2(0x2A, 0x2A, 0x38);
+    app::foreground(0xE8, 0xE8, 0xEC);
+    app::set_font_size(14);
+    let mut win = Window::new(100, 100, 1050, 700, "Emblium");
+    win.set_color(fltk::enums::Color::from_rgb(0x1E, 0x1E, 0x28));
 
     let state = Rc::new(RefCell::new(AppState::new()));
 
@@ -83,6 +89,7 @@ fn main() {
     side.set_spacing(8);
 
     let mut load_engine_btn = Button::new(0, 0, 390, 30, "Engine laden...");
+    style_accent_button(&mut load_engine_btn);
     let mut engine_status = Frame::new(0, 0, 390, 24, "Keine Engine geladen");
     engine_status.set_align(Align::Left | Align::Inside);
 
@@ -90,10 +97,16 @@ fn main() {
     color_choice.add_choice("Mensch spielt Weiß");
     color_choice.add_choice("Mensch spielt Schwarz");
     color_choice.set_value(0);
+    color_choice.set_frame(FrameType::FlatBox);
+    color_choice.set_color(fltk::enums::Color::from_rgb(0x2A, 0x2A, 0x38));
+    color_choice.set_text_color(fltk::enums::Color::from_rgb(0xE8, 0xE8, 0xEC));
 
     let mut new_game_btn = Button::new(0, 0, 390, 30, "Neue Partie");
+    style_accent_button(&mut new_game_btn);
     let mut flip_btn = Button::new(0, 0, 390, 30, "Brett drehen");
+    style_flat_button(&mut flip_btn);
     let mut tournament_btn = Button::new(0, 0, 390, 30, "Turnier & SPRT öffnen...");
+    style_flat_button(&mut tournament_btn);
 
     let time_row_label = Frame::new(0, 0, 390, 18, "Bedenkzeit der Engine pro Zug:");
     let mut time_row = Pack::new(0, 0, 390, 28, "");
@@ -101,10 +114,15 @@ fn main() {
     time_row.set_spacing(8);
     let mut movetime_input = IntInput::new(0, 0, 100, 28, "");
     movetime_input.set_value(&DEFAULT_MOVE_TIME_MS.to_string());
+    movetime_input.set_frame(FrameType::FlatBox);
+    movetime_input.set_color(fltk::enums::Color::from_rgb(0x2A, 0x2A, 0x38));
+    movetime_input.set_text_color(fltk::enums::Color::from_rgb(0xE8, 0xE8, 0xEC));
     let ms_label = Frame::new(0, 0, 40, 28, "ms");
     let mut infinite_check = CheckButton::new(0, 0, 120, 28, "Unendlich");
+    infinite_check.set_selection_color(fltk::enums::Color::from_rgb(0x5B, 0x8D, 0xEF));
     time_row.end();
     let mut stop_btn = Button::new(0, 0, 390, 28, "Engine anhalten (Stopp)");
+    style_warning_button(&mut stop_btn);
 
     let eval_label = Frame::new(0, 0, 390, 20, "Eval (Bauerneinheiten, Sicht Weiß):");
     let mut eval_bar = Progress::new(0, 0, 390, 24, "");
@@ -112,14 +130,22 @@ fn main() {
     eval_bar.set_maximum(1000.0);
     eval_bar.set_value(0.0);
     eval_bar.set_label("0.00");
+    eval_bar.set_frame(FrameType::FlatBox);
+    eval_bar.set_color(fltk::enums::Color::from_rgb(0x2A, 0x2A, 0x38));
+    eval_bar.set_selection_color(fltk::enums::Color::from_rgb(0x5B, 0x8D, 0xEF));
 
     let move_list_label = Frame::new(0, 0, 390, 20, "Zugliste:");
-    let move_list = HoldBrowser::new(0, 0, 390, 160, "");
+    let mut move_list = HoldBrowser::new(0, 0, 390, 160, "");
+    move_list.set_frame(FrameType::FlatBox);
+    move_list.set_color(fltk::enums::Color::from_rgb(0x2A, 0x2A, 0x38));
 
     let output_label = Frame::new(0, 0, 390, 20, "Engine-Ausgabe:");
     let mut engine_output = TextDisplay::new(0, 0, 390, 260, "");
     let output_buffer = TextBuffer::default();
     engine_output.set_buffer(output_buffer.clone());
+    engine_output.set_frame(FrameType::FlatBox);
+    engine_output.set_color(fltk::enums::Color::from_rgb(0x2A, 0x2A, 0x38));
+    engine_output.set_text_color(fltk::enums::Color::from_rgb(0xE8, 0xE8, 0xEC));
 
     side.end();
     win.end();
@@ -265,7 +291,7 @@ fn main() {
     // ---------- Turnier-/SPRT-Fenster öffnen ----------
     {
         tournament_btn.set_callback(move |_| {
-            emble_gui_rs::tournament_window::open_tournament_window();
+            emblium::tournament_window::open_tournament_window();
         });
     }
 
@@ -341,6 +367,27 @@ fn main() {
     );
 
     app.run().unwrap();
+}
+
+fn style_accent_button(btn: &mut Button) {
+    btn.set_frame(FrameType::FlatBox);
+    btn.set_color(fltk::enums::Color::from_rgb(0x5B, 0x8D, 0xEF));
+    btn.set_label_color(fltk::enums::Color::from_rgb(0xFF, 0xFF, 0xFF));
+    btn.clear_visible_focus();
+}
+
+fn style_flat_button(btn: &mut Button) {
+    btn.set_frame(FrameType::FlatBox);
+    btn.set_color(fltk::enums::Color::from_rgb(0x3A, 0x3A, 0x4A));
+    btn.set_label_color(fltk::enums::Color::from_rgb(0xE8, 0xE8, 0xEC));
+    btn.clear_visible_focus();
+}
+
+fn style_warning_button(btn: &mut Button) {
+    btn.set_frame(FrameType::FlatBox);
+    btn.set_color(fltk::enums::Color::from_rgb(0xC0, 0x5C, 0x4A));
+    btn.set_label_color(fltk::enums::Color::from_rgb(0xFF, 0xFF, 0xFF));
+    btn.clear_visible_focus();
 }
 
 fn try_load_engine(path: &str, state: &Rc<RefCell<AppState>>, engine_status: &mut Frame) {
