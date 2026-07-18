@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use emble_gui_rs::board;
 use emble_gui_rs::uci_engine;
 
@@ -6,22 +8,41 @@ use std::rc::Rc;
 
 use fltk::app;
 use fltk::browser::HoldBrowser;
-use fltk::button::Button;
+use fltk::button::{Button, CheckButton};
 use fltk::dialog;
 use fltk::enums::{Align, Event, FrameType};
 use fltk::frame::Frame;
 use fltk::group::Pack;
+use fltk::input::IntInput;
 use fltk::menu::Choice;
 use fltk::misc::Progress;
 use fltk::prelude::*;
 use fltk::text::{TextBuffer, TextDisplay};
 use fltk::window::Window;
+use std::path::PathBuf;
 
 use board::BoardState;
 use shakmaty::Position;
 use uci_engine::{EngineEvent, UciEngine};
 
-const HUMAN_MOVE_TIME_MS: u32 = 1000;
+const DEFAULT_MOVE_TIME_MS: u32 = 1000;
+
+fn config_file_path() -> PathBuf {
+    let mut p = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    p.set_file_name("emble_gui_last_engine.txt");
+    p
+}
+
+fn load_last_engine_path() -> Option<String> {
+    std::fs::read_to_string(config_file_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn save_last_engine_path(path: &str) {
+    let _ = std::fs::write(config_file_path(), path);
+}
 
 struct AppState {
     board: BoardState,
@@ -29,6 +50,8 @@ struct AppState {
     human_is_white: bool,
     waiting_for_engine: bool,
     game_over: bool,
+    movetime_ms: u32,
+    infinite: bool,
 }
 
 impl AppState {
@@ -39,12 +62,14 @@ impl AppState {
             human_is_white: true,
             waiting_for_engine: false,
             game_over: false,
+            movetime_ms: DEFAULT_MOVE_TIME_MS,
+            infinite: false,
         }
     }
 }
 
 fn main() {
-    let app = app::App::default();
+    let app = app::App::default().with_scheme(app::Scheme::Gtk);
     let mut win = Window::new(100, 100, 1050, 700, "Emble GUI");
 
     let state = Rc::new(RefCell::new(AppState::new()));
@@ -69,6 +94,17 @@ fn main() {
     let mut new_game_btn = Button::new(0, 0, 390, 30, "Neue Partie");
     let mut flip_btn = Button::new(0, 0, 390, 30, "Brett drehen");
     let mut tournament_btn = Button::new(0, 0, 390, 30, "Turnier & SPRT öffnen...");
+
+    let time_row_label = Frame::new(0, 0, 390, 18, "Bedenkzeit der Engine pro Zug:");
+    let mut time_row = Pack::new(0, 0, 390, 28, "");
+    time_row.set_type(fltk::group::PackType::Horizontal);
+    time_row.set_spacing(8);
+    let mut movetime_input = IntInput::new(0, 0, 100, 28, "");
+    movetime_input.set_value(&DEFAULT_MOVE_TIME_MS.to_string());
+    let ms_label = Frame::new(0, 0, 40, 28, "ms");
+    let mut infinite_check = CheckButton::new(0, 0, 120, 28, "Unendlich");
+    time_row.end();
+    let mut stop_btn = Button::new(0, 0, 390, 28, "Engine anhalten (Stopp)");
 
     let eval_label = Frame::new(0, 0, 390, 20, "Eval (Bauerneinheiten, Sicht Weiß):");
     let mut eval_bar = Progress::new(0, 0, 390, 24, "");
@@ -137,27 +173,38 @@ fn main() {
         let state = state.clone();
         let mut engine_status_h = engine_status.clone();
         load_engine_btn.set_callback(move |_| {
-            let mut chooser = dialog::FileChooser::new(
-                ".",
-                "*",
-                dialog::FileChooserType::Single,
-                "UCI-Engine auswählen",
-            );
+            let mut chooser = dialog::NativeFileChooser::new(dialog::FileDialogType::BrowseFile);
+            chooser.set_title("UCI-Engine auswählen");
             chooser.show();
-            while chooser.shown() {
-                app::wait();
+            let path = chooser.filename();
+            if path.as_os_str().is_empty() {
+                return;
             }
-            if let Some(path) = chooser.value(1) {
-                match UciEngine::start(&path) {
-                    Ok(engine) => {
-                        let mut st = state.borrow_mut();
-                        st.engine = Some(engine);
-                        engine_status_h.set_label(&format!("Lade: {path} ..."));
-                    }
-                    Err(e) => {
-                        dialog::alert_default(&format!("Engine konnte nicht gestartet werden:\n{e}"));
-                    }
-                }
+            let path = path.to_string_lossy().to_string();
+            try_load_engine(&path, &state, &mut engine_status_h);
+        });
+    }
+
+    // ---------- Zeitkontrolle ----------
+    {
+        let state = state.clone();
+        movetime_input.set_callback(move |i| {
+            if let Ok(ms) = i.value().parse::<u32>() {
+                state.borrow_mut().movetime_ms = ms.max(1);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        infinite_check.set_callback(move |c| {
+            state.borrow_mut().infinite = c.is_checked();
+        });
+    }
+    {
+        let state = state.clone();
+        stop_btn.set_callback(move |_| {
+            if let Some(engine) = state.borrow_mut().engine.as_mut() {
+                let _ = engine.stop_search();
             }
         });
     }
@@ -169,6 +216,15 @@ fn main() {
             let mut st = state.borrow_mut();
             st.human_is_white = c.value() == 0;
         });
+    }
+
+    // ---------- Automatisch zuletzt genutzte Engine laden ----------
+    if let Some(last_path) = load_last_engine_path() {
+        if std::path::Path::new(&last_path).exists() {
+            let state = state.clone();
+            let mut engine_status_h = engine_status.clone();
+            try_load_engine(&last_path, &state, &mut engine_status_h);
+        }
     }
 
     // ---------- Neue Partie ----------
@@ -279,9 +335,25 @@ fn main() {
     }
 
     // Referenzen am Leben halten, die nur in Closures verwendet werden
-    let _keep = (eval_label, move_list_label, output_label, color_choice.clone());
+    let _keep = (
+        eval_label, move_list_label, output_label, color_choice.clone(),
+        time_row_label, ms_label,
+    );
 
     app.run().unwrap();
+}
+
+fn try_load_engine(path: &str, state: &Rc<RefCell<AppState>>, engine_status: &mut Frame) {
+    match UciEngine::start(path) {
+        Ok(engine) => {
+            state.borrow_mut().engine = Some(engine);
+            engine_status.set_label(&format!("Lade: {path} ..."));
+            save_last_engine_path(path);
+        }
+        Err(e) => {
+            dialog::alert_default(&format!("Engine konnte nicht gestartet werden:\n{e}"));
+        }
+    }
 }
 
 fn refresh_move_list(board: &BoardState, list: &mut HoldBrowser) {
@@ -315,5 +387,9 @@ fn request_engine_move(st: &mut AppState) {
     st.waiting_for_engine = true;
     let moves = st.board.uci_history();
     let _ = engine.set_position(&moves);
-    let _ = engine.go_movetime(HUMAN_MOVE_TIME_MS);
+    if st.infinite {
+        let _ = engine.go_infinite();
+    } else {
+        let _ = engine.go_movetime(st.movetime_ms);
+    }
 }
